@@ -2435,23 +2435,43 @@ function LoginScreen({onLogin}) {
   async function handleGoogleCallback(){
     setGoogleLoading(true);
     try {
-      // Extract token from URL hash
+      // Extract Supabase access token from URL hash
       const params = new URLSearchParams(window.location.hash.replace("#",""));
       const accessToken = params.get("access_token");
-      if(!accessToken){ setError("Google login failed. Try again."); setGoogleLoading(false); return; }
+      if(!accessToken){ setError("Google login failed — no token received. Try again."); setGoogleLoading(false); return; }
 
-      // Get user info from Google
-      const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{
-        headers:{ Authorization:"Bearer "+accessToken }
+      // Ask SUPABASE (not Google directly) who this user is —
+      // Supabase issues its own session token after OAuth, so we must
+      // query Supabase's auth endpoint, not Google's userinfo API.
+      const res = await fetch(SUPA_URL+"/auth/v1/user", {
+        headers: {
+          "Authorization": "Bearer "+accessToken,
+          "apikey": SUPA_KEY
+        }
       });
-      const gUser = await res.json();
-      const email = gUser.email?.toLowerCase();
-      if(!email){ setError("Could not get email from Google."); setGoogleLoading(false); return; }
 
-      // Clear hash from URL
+      if(!res.ok){
+        const errText = await res.text();
+        setError("Could not verify Google session. ("+res.status+") Try again.");
+        console.error("Supabase auth/user error:", errText);
+        setGoogleLoading(false);
+        return;
+      }
+
+      const supaUser = await res.json();
+      const email = (supaUser.email || supaUser.user_metadata?.email || "").toLowerCase();
+
+      if(!email){
+        setError("Could not get email from Google account. Try again.");
+        console.error("Supabase user object:", supaUser);
+        setGoogleLoading(false);
+        return;
+      }
+
+      // Clear hash from URL so refresh doesn't re-trigger callback
       window.history.replaceState(null,"",window.location.pathname);
 
-      // Look up in our users table
+      // Look up in our own users table
       const user = await db.getUserByEmail(email);
       if(!user){
         setError("No account found for "+email+". Contact your administrator to get access.");
@@ -2461,7 +2481,10 @@ function LoginScreen({onLogin}) {
       let school = null;
       if(user.role!=="super_admin"&&user.school_id) school = await db.getSchool(user.school_id);
       onLogin(user,school);
-    } catch(e){ setError("Google login error. Try again."); }
+    } catch(e){
+      setError("Google login error. Try again.");
+      console.error("Google callback error:", e);
+    }
     setGoogleLoading(false);
   }
 
