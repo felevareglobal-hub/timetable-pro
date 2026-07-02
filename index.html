@@ -2422,6 +2422,7 @@ function LoginScreen({onLogin}) {
   const [loading,setLoading] = useState(false);
   const [googleLoading,setGoogleLoading] = useState(false);
   const [error,setError]     = useState("");
+  const [debugInfo,setDebugInfo] = useState("");
   const [tab,setTab]         = useState("google"); // google | email
 
   // Handle Google OAuth redirect callback
@@ -2434,15 +2435,26 @@ function LoginScreen({onLogin}) {
 
   async function handleGoogleCallback(){
     setGoogleLoading(true);
+    const debug = [];
     try {
-      // Extract Supabase access token from URL hash
-      const params = new URLSearchParams(window.location.hash.replace("#",""));
+      const hashStr = window.location.hash.replace("#","");
+      debug.push("Hash length: "+hashStr.length);
+      const params = new URLSearchParams(hashStr);
       const accessToken = params.get("access_token");
-      if(!accessToken){ setError("Google login failed — no token received. Try again."); setGoogleLoading(false); return; }
+      const tokenType   = params.get("token_type");
+      const expiresIn   = params.get("expires_in");
+      const providerToken = params.get("provider_token");
+      debug.push("access_token present: "+(!!accessToken));
+      debug.push("token_type: "+tokenType);
+      debug.push("provider_token present: "+(!!providerToken));
 
-      // Ask SUPABASE (not Google directly) who this user is —
-      // Supabase issues its own session token after OAuth, so we must
-      // query Supabase's auth endpoint, not Google's userinfo API.
+      if(!accessToken){
+        setError("Google login failed — no token received.");
+        setDebugInfo(debug.join(" | "));
+        setGoogleLoading(false);
+        return;
+      }
+
       const res = await fetch(SUPA_URL+"/auth/v1/user", {
         headers: {
           "Authorization": "Bearer "+accessToken,
@@ -2450,28 +2462,37 @@ function LoginScreen({onLogin}) {
         }
       });
 
+      debug.push("Supabase /auth/v1/user status: "+res.status);
+      const bodyText = await res.text();
+      debug.push("Response body: "+bodyText.substring(0,300));
+
       if(!res.ok){
-        const errText = await res.text();
-        setError("Could not verify Google session. ("+res.status+") Try again.");
-        console.error("Supabase auth/user error:", errText);
+        setError("Could not verify Google session (status "+res.status+"). See debug info below.");
+        setDebugInfo(debug.join(" || "));
         setGoogleLoading(false);
         return;
       }
 
-      const supaUser = await res.json();
-      const email = (supaUser.email || supaUser.user_metadata?.email || "").toLowerCase();
+      let supaUser;
+      try { supaUser = JSON.parse(bodyText); } catch(parseErr){
+        setError("Could not parse Supabase response.");
+        setDebugInfo(debug.join(" || "));
+        setGoogleLoading(false);
+        return;
+      }
+
+      const email = (supaUser.email || supaUser.user_metadata?.email || supaUser.user_metadata?.user_name || "").toLowerCase();
+      debug.push("Extracted email: "+(email||"NONE"));
 
       if(!email){
-        setError("Could not get email from Google account. Try again.");
-        console.error("Supabase user object:", supaUser);
+        setError("Could not get email from Google account.");
+        setDebugInfo(debug.join(" || "));
         setGoogleLoading(false);
         return;
       }
 
-      // Clear hash from URL so refresh doesn't re-trigger callback
       window.history.replaceState(null,"",window.location.pathname);
 
-      // Look up in our own users table
       const user = await db.getUserByEmail(email);
       if(!user){
         setError("No account found for "+email+". Contact your administrator to get access.");
@@ -2482,7 +2503,8 @@ function LoginScreen({onLogin}) {
       if(user.role!=="super_admin"&&user.school_id) school = await db.getSchool(user.school_id);
       onLogin(user,school);
     } catch(e){
-      setError("Google login error. Try again.");
+      setError("Google login error: "+e.message);
+      setDebugInfo("Exception: "+e.message+" || "+debug.join(" || "));
       console.error("Google callback error:", e);
     }
     setGoogleLoading(false);
@@ -2536,6 +2558,7 @@ function LoginScreen({onLogin}) {
         </div>
 
         {error&&<div style={{background:"#fff1f2",border:"1px solid #fecdd3",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#dc2626",marginBottom:14,lineHeight:1.5}}>⚠️ {error}</div>}
+        {debugInfo&&<div style={{background:"#0f172a",borderRadius:10,padding:"10px 14px",fontSize:10,color:"#4ade80",marginBottom:14,lineHeight:1.6,fontFamily:"monospace",wordBreak:"break-all",maxHeight:200,overflowY:"auto"}}>{debugInfo}</div>}
 
         {/* Google Login */}
         {tab==="google"&&(
