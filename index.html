@@ -2338,12 +2338,57 @@ function App() {
   function showToast(msg){setToast(msg);setTimeout(()=>setToast(null),3000);}
   function navTo(id){setActiveNav(id);setMenuOpen(false);}
 
+  // Load demo data if in demo mode
+  useEffect(()=>{
+    if(currentSchool?.is_demo && standards.length===0){
+      setStandards([
+        {id:"demo-std1",standard:"Class 5",section:"Primary",divisions:["A","B"],numDivisions:2},
+        {id:"demo-std2",standard:"Class 6",section:"Secondary",divisions:["A"],numDivisions:1},
+        {id:"demo-std3",standard:"Class 7",section:"Secondary",divisions:["A"],numDivisions:1},
+      ]);
+      setSubjects(["Mathematics","English","Hindi","Science","Social Studies","Computer Science","Physical Education"]);
+      setTeachers([
+        {id:"demo-t1",name:"Mrs. Priya Sharma",whatsapp:"+91 98765 43210",bloodGroup:"B+",photo:"",subjects:["Mathematics","Science"],
+          assignments:[
+            {id:"da1",standardId:"demo-std1",division:"A",subject:"Mathematics",periodsPerWeek:5},
+            {id:"da2",standardId:"demo-std1",division:"B",subject:"Mathematics",periodsPerWeek:5},
+            {id:"da3",standardId:"demo-std2",division:"A",subject:"Science",periodsPerWeek:4},
+          ]},
+        {id:"demo-t2",name:"Mr. Rahul Patel",whatsapp:"+91 98765 43211",bloodGroup:"O+",photo:"",subjects:["English","Hindi"],
+          assignments:[
+            {id:"da4",standardId:"demo-std1",division:"A",subject:"English",periodsPerWeek:4},
+            {id:"da5",standardId:"demo-std1",division:"B",subject:"Hindi",periodsPerWeek:3},
+            {id:"da6",standardId:"demo-std2",division:"A",subject:"English",periodsPerWeek:4},
+          ]},
+        {id:"demo-t3",name:"Mrs. Sunita Joshi",whatsapp:"+91 98765 43212",bloodGroup:"A+",photo:"",subjects:["Social Studies","Computer Science"],
+          assignments:[
+            {id:"da7",standardId:"demo-std1",division:"A",subject:"Social Studies",periodsPerWeek:3},
+            {id:"da8",standardId:"demo-std2",division:"A",subject:"Computer Science",periodsPerWeek:3},
+          ]},
+      ]);
+    }
+  },[currentSchool]);
+
   const screenProps={school,setSchool,standards,setStandards,subjects,setSubjects,teachers,setTeachers,daySchedules,setDaySchedules,timetable,setTimetable};
   const currentNav = NAV.find(n=>n.id===activeNav);
 
   return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"system-ui,sans-serif",display:"flex",flexDirection:"column"}}>
       {toast && <Toast msg={toast} onClose={()=>setToast(null)}/>}
+
+      {/* Demo Banner */}
+      {school.is_demo&&(
+        <div style={{background:"#f59e0b",color:"white",padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:14}}>🎓</span>
+            <span style={{fontSize:12,fontWeight:700}}>DEMO MODE — Sample data for preview only. Data will not be saved.</span>
+          </div>
+          <button onClick={onLogout}
+            style={{background:"white",color:"#92400e",border:"none",borderRadius:8,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+            Exit Demo
+          </button>
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div style={{background:"#4f46e5",color:"white",padding:"12px 16px",display:"flex",alignItems:"center",gap:"10px",position:"sticky",top:0,zIndex:50,boxShadow:"0 2px 8px rgba(0,0,0,0.15)"}}>
@@ -2533,6 +2578,31 @@ function LoginScreen({onLogin}) {
     setLoading(false);
   }
 
+  function handleDemoLogin() {
+    // Demo user — Principal role with pre-loaded sample school
+    const demoUser = {
+      id: "demo-user",
+      email: "demo@timetablepro.in",
+      name: "Demo Principal",
+      role: "principal",
+      school_id: "demo-school",
+    };
+    const demoSchool = {
+      id: "demo-school",
+      name: "St. Mary's High School (Demo)",
+      address: "123 MG Road, Mumbai, Maharashtra 400001",
+      board: "CBSE",
+      principal_name: "Demo Principal",
+      principal_address: "Mumbai",
+      start_time: "10:00",
+      operation_days: "5",
+      saturday_working: true,
+      weekly_holidays: ["Sunday"],
+      is_demo: true,
+    };
+    onLogin(demoUser, demoSchool);
+  }
+
   return (
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"system-ui,sans-serif"}}>
       <div style={{background:"white",borderRadius:24,padding:32,width:"100%",maxWidth:400,boxShadow:"0 24px 64px rgba(0,0,0,0.3)"}}>
@@ -2544,18 +2614,7 @@ function LoginScreen({onLogin}) {
           <div style={{fontSize:13,color:"#94a3b8",marginTop:4}}>School Timetable Management</div>
         </div>
 
-        {/* Tab toggle */}
-        <div style={{display:"flex",gap:3,background:"#f1f5f9",borderRadius:12,padding:3,marginBottom:20}}>
-          {[{id:"google",label:"🔵 Google Login"},{id:"email",label:"✉️ Email Login"}].map(t=>(
-            <button key={t.id} onClick={()=>{setTab(t.id);setError("");}}
-              style={{flex:1,padding:"8px 12px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
-                background:tab===t.id?"white":"transparent",
-                color:tab===t.id?"#4f46e5":"#94a3b8",
-                boxShadow:tab===t.id?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+
 
         {error&&<div style={{background:"#fff1f2",border:"1px solid #fecdd3",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#dc2626",marginBottom:14,lineHeight:1.5}}>⚠️ {error}</div>}
         {debugInfo&&<div style={{background:"#0f172a",borderRadius:10,padding:"10px 14px",fontSize:10,color:"#4ade80",marginBottom:14,lineHeight:1.6,fontFamily:"monospace",wordBreak:"break-all",maxHeight:200,overflowY:"auto"}}>{debugInfo}</div>}
@@ -2579,42 +2638,55 @@ function LoginScreen({onLogin}) {
                 </>
               )}
             </button>
+
+            {/* Divider */}
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+              <div style={{flex:1,height:1,background:"#e2e8f0"}}/>
+              <span style={{fontSize:11,color:"#94a3b8",fontWeight:600}}>OR</span>
+              <div style={{flex:1,height:1,background:"#e2e8f0"}}/>
+            </div>
+
+            {/* Demo Login */}
+            <button onClick={handleDemoLogin}
+              style={{width:"100%",background:"linear-gradient(135deg,#f0fdf4,#dcfce7)",color:"#166534",border:"2px solid #86efac",borderRadius:12,padding:"12px 16px",fontWeight:700,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:14}}>
+              🎓 Try Demo Account
+            </button>
+
             <div style={{fontSize:11,color:"#94a3b8",textAlign:"center",lineHeight:1.6}}>
               Your Google account email must be registered by the administrator to access the system.
             </div>
           </div>
         )}
 
-        {/* Email Login */}
-        {tab==="email"&&(
-          <div>
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:6}}>Email Address</div>
-              <input value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleEmailLogin()}
-                placeholder="Enter your registered email"
-                style={{width:"100%",border:"2px solid #e2e8f0",borderRadius:12,padding:"11px 14px",fontSize:14,outline:"none",boxSizing:"border-box"}}
-                onFocus={e=>e.target.style.borderColor="#4f46e5"}
-                onBlur={e=>e.target.style.borderColor="#e2e8f0"}/>
-            </div>
-            <button onClick={handleEmailLogin} disabled={loading||!email.trim()}
-              style={{width:"100%",background:email.trim()?"#4f46e5":"#e2e8f0",color:email.trim()?"white":"#94a3b8",border:"none",borderRadius:12,padding:13,fontWeight:700,fontSize:14,cursor:email.trim()?"pointer":"default",marginBottom:14}}>
-              {loading?"Signing in...":"Sign In →"}
-            </button>
-            <div style={{fontSize:11,color:"#94a3b8",textAlign:"center",lineHeight:1.6}}>
-              Enter the email registered by your administrator.
-            </div>
-          </div>
-        )}
+        {/* Email login fallback */}
+        <div style={{marginTop:16,textAlign:"center"}}>
+          {tab==="google"
+            ? <button onClick={()=>{setTab("email");setError("");}}
+                style={{background:"none",border:"none",color:"#94a3b8",fontSize:11,cursor:"pointer",textDecoration:"underline"}}>
+                Sign in with email instead
+              </button>
+            : <div>
+                <div style={{marginBottom:10}}>
+                  <input value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleEmailLogin()}
+                    placeholder="Enter your registered email"
+                    style={{width:"100%",border:"2px solid #e2e8f0",borderRadius:12,padding:"11px 14px",fontSize:14,outline:"none",boxSizing:"border-box",marginBottom:8}}
+                    onFocus={e=>e.target.style.borderColor="#4f46e5"}
+                    onBlur={e=>e.target.style.borderColor="#e2e8f0"}/>
+                  <button onClick={handleEmailLogin} disabled={loading||!email.trim()}
+                    style={{width:"100%",background:email.trim()?"#4f46e5":"#e2e8f0",color:email.trim()?"white":"#94a3b8",border:"none",borderRadius:12,padding:12,fontWeight:700,fontSize:13,cursor:email.trim()?"pointer":"default"}}>
+                    {loading?"Signing in...":"Sign In →"}
+                  </button>
+                </div>
+                <button onClick={()=>{setTab("google");setError("");}}
+                  style={{background:"none",border:"none",color:"#94a3b8",fontSize:11,cursor:"pointer",textDecoration:"underline"}}>
+                  ← Back to Google Login
+                </button>
+              </div>
+          }
+        </div>
 
         {/* Role info */}
-        <div style={{marginTop:20,background:"#f8fafc",borderRadius:10,padding:"10px 14px",fontSize:11,color:"#64748b"}}>
-          <div style={{fontWeight:700,marginBottom:5,color:"#475569"}}>Access Levels:</div>
-          <div style={{display:"flex",flexDirection:"column",gap:3}}>
-            <div>🔵 <strong>Super Admin</strong> — Manages all schools & users</div>
-            <div>🟢 <strong>Principal / Admin</strong> — Full school control</div>
-            <div>🟡 <strong>Class Teacher</strong> — View & edit own class only</div>
-          </div>
-        </div>
+
       </div>
     </div>
   );
