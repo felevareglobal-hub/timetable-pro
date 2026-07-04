@@ -25,6 +25,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet"/>
   <style>
     *{box-sizing:border-box;}
@@ -381,8 +384,14 @@ function Dashboard({school,standards,subjects,teachers,timetable,onNav}) {
 }
 
 // School Profile
-function SchoolScreen({school,setSchool}) {
-  function upd(k,v){setSchool(s=>({...s,[k]:v}));}
+function SchoolScreen({school,setSchool,saveSchoolProfile}) {
+  function upd(k,v){
+    setSchool(s=>{
+      const updated={...s,[k]:v};
+      if(saveSchoolProfile) saveSchoolProfile(updated);
+      return updated;
+    });
+  }
   function toggleHoliday(d){setSchool(s=>({...s,weeklyHolidays:s.weeklyHolidays.includes(d)?s.weeklyHolidays.filter(x=>x!==d):[...s.weeklyHolidays,d]}));}
   return (
     <div className="space-y-4">
@@ -418,10 +427,24 @@ function SchoolScreen({school,setSchool}) {
 }
 
 // Standards & Divisions
-function StandardsScreen({standards,setStandards}) {
-  function addRow(){setStandards(s=>[...s,{id:uid(),standard:"",section:"",numDivisions:1,divisions:["A"]}]);}
-  function upd(id,k,v){setStandards(rows=>rows.map(r=>{if(r.id!==id)return r;const u={...r,[k]:v};if(k==="numDivisions"){const n=parseInt(v)||1;u.divisions=DIVISIONS_LIST.slice(0,n);}return u;}));}
-  function remove(id){setStandards(s=>s.filter(r=>r.id!==id));}
+function StandardsScreen({standards,setStandards,saveStandards}) {
+  function addRow(){
+    const updated=[...standards,{id:uid(),standard:"",section:"",numDivisions:1,divisions:["A"]}];
+    setStandards(updated);
+    if(saveStandards) saveStandards(updated);
+  }
+  function upd(id,k,v){
+    setStandards(rows=>{
+      const updated=rows.map(r=>{if(r.id!==id)return r;const u={...r,[k]:v};if(k==="numDivisions"){const n=parseInt(v)||1;u.divisions=DIVISIONS_LIST.slice(0,n);}return u;});
+      if(saveStandards) saveStandards(updated);
+      return updated;
+    });
+  }
+  function remove(id){
+    const updated=standards.filter(r=>r.id!==id);
+    setStandards(updated);
+    if(saveStandards) saveStandards(updated);
+  }
   function addAll(){
     const ex=standards.map(r=>r.standard);
     const newRows=ALL_STANDARDS.filter(s=>!ex.includes(s)).map(s=>({
@@ -775,10 +798,21 @@ function ScheduleScreen({school,setSchool,daySchedules,setDaySchedules}) {
 }
 
 // Subjects
-function SubjectsScreen({subjects,setSubjects}) {
+function SubjectsScreen({subjects,setSubjects,saveSubjects}) {
   const [newSubj,setNewSubj]=useState("");
-  function add(){const t=newSubj.trim();if(!t||subjects.includes(t))return;setSubjects(s=>[...s,t]);setNewSubj("");}
-  function remove(i){setSubjects(s=>s.filter((_,idx)=>idx!==i));}
+  function add(){
+    const t=newSubj.trim();
+    if(!t||subjects.includes(t))return;
+    const updated=[...subjects,t];
+    setSubjects(updated);
+    if(saveSubjects) saveSubjects(updated);
+    setNewSubj("");
+  }
+  function remove(i){
+    const updated=subjects.filter((_,idx)=>idx!==i);
+    setSubjects(updated);
+    if(saveSubjects) saveSubjects(updated);
+  }
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-bold text-slate-800">Subjects</h2>
@@ -806,10 +840,16 @@ function TeachersScreen({teachers,setTeachers,subjects,standards}) {
     setEditing("new");
   }
   function openEdit(t){setForm(JSON.parse(JSON.stringify(t)));setEditing(t.id);}
-  function saveTeacher(){
+  async function saveTeacher(){
     if(!form.name?.trim()) return;
-    if(editing==="new") setTeachers(t=>[...t,form]);
-    else setTeachers(t=>t.map(x=>x.id===editing?form:x));
+    let savedForm = {...form};
+    // Save to Supabase
+    if(saveTeacherToDb){
+      const tid = await saveTeacherToDb(form);
+      if(tid&&editing==="new") savedForm={...form,id:tid};
+    }
+    if(editing==="new") setTeachers(t=>[...t,savedForm]);
+    else setTeachers(t=>t.map(x=>x.id===editing?savedForm:x));
     setEditing(null);
   }
   function deleteTeacher(id){setTeachers(t=>t.filter(x=>x.id!==id));}
@@ -1179,7 +1219,7 @@ function AddClassRow({subj,standards,onAdd,existing}){
 }
 
 // Timetable View
-function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTimetable}) {
+function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTimetable,saveTimetableToDb,classTeachers:initialClassTeachers}) {
   const [activeKey,setActiveKey]       = useState(null);
   const [viewMode,setViewMode]         = useState("class");
   const [viewTeacher,setViewTeacher]   = useState(null);
@@ -1409,6 +1449,8 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
     setTimetable(tt);
     setDebugLog(log);
     if(allKeys.length) setActiveKey(allKeys[0].key);
+    // Auto-save to Supabase
+    if(saveTimetableToDb) saveTimetableToDb(tt, classTeachers);
   }
 
   // ── Manual cell edit ──
@@ -1419,6 +1461,7 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
     setTimetable(prev => {
       const updated = JSON.parse(JSON.stringify(prev));
       updated[key][day][si] = {subject:newSubject, teacherId:newTeacherId, tname:t?.name||""};
+      if(saveTimetableToDb) saveTimetableToDb(updated, classTeachers);
       return updated;
     });
     setEditCell(null);
@@ -1507,8 +1550,8 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
     window.open(url,"_blank");
   }
 
-  // ── PDF Export ──
-  function exportPDF(key) {
+  // ── PDF Export (downloads as PDF file for WhatsApp sharing) ──
+  async function exportPDF(key) {
     if(!timetable||!timetable[key]) return;
     const info   = allKeys.find(k=>k.key===key);
     const ctId   = classTeachers[key];
@@ -1522,108 +1565,234 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
       return daySchedules[day]?.slots||[];
     }
 
-    // Build HTML for print-to-PDF
+    const SUBJ_COLORS = [
+      [219,234,254],[220,252,231],[254,249,195],[255,228,230],[237,233,254],
+      [207,254,254],[255,237,213],[204,251,241],[224,231,255],[236,252,203]
+    ];
+    const allSubj = [...new Set(teachers.flatMap(t=>t.subjects||[]))];
+    const sColorMap = {};
+    allSubj.forEach((s,i)=>{ sColorMap[s]=SUBJ_COLORS[i%SUBJ_COLORS.length]; });
+
     const refS    = getSlots(workingDays[0]||"Monday");
     const refComp = computeSlots(refS, startMins);
 
-    const FIXED_BG = {assembly:"#fffbeb",recess:"#dcfce7",lunch:"#ffedd5",pt:"#cffafe",library:"#ede9fe",activity:"#ffe4e6"};
-    const SUBJ_COLORS = ["#dbeafe","#dcfce7","#fef9c3","#ffe4e6","#ede9fe","#ecfeff","#ffedd5","#ccfbf1","#e0e7ff","#ecfccb"];
-    const allSubj  = [...new Set(teachers.flatMap(t=>t.subjects||[]))];
-    const sColorMap= {};
-    allSubj.forEach((s,i)=>{sColorMap[s]=SUBJ_COLORS[i%SUBJ_COLORS.length];});
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
+    const pageW = 297, pageH = 210;
+    const margin = 10;
+    let y = margin;
 
-    const dayHeaders = workingDays.map(d=>`<th style="padding:8px;border:1px solid #94a3b8;background:#1e293b;color:white;font-size:11px;text-align:center;">${d}</th>`).join("");
+    // ── Header ──
+    doc.setFillColor(79,70,229);
+    doc.rect(0,0,pageW,22,  "F");
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(16); doc.setFont("helvetica","bold");
+    doc.text(school.name||"School", pageW/2, 10, {align:"center"});
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    const sub = [school.board&&"Board: "+school.board, school.address].filter(Boolean).join("  |  ");
+    doc.text(sub, pageW/2, 16, {align:"center"});
+    y = 26;
 
-    const rows = refS.map((slot,si)=>{
-      const comp = refComp[si];
-      const time = comp ? minsToTime(comp.startMins)+" – "+minsToTime(comp.endMins) : "";
-      const cells = workingDays.map(day=>{
-        // Get correct slots for this day
-        const dSlots = getSlots(day);
-        const dComp  = computeSlots(dSlots, startMins);
-        const cell   = (timetable[key][day]||[])[si];
-        if(!cell) return `<td style="padding:6px 8px;border:1px solid #e2e8f0;"></td>`;
-        if(cell.fixed){
-          const bg = FIXED_BG[cell.type]||"#f8fafc";
-          return `<td style="padding:6px 8px;border:1px solid #e2e8f0;background:${bg};text-align:center;font-weight:600;font-size:10px;">${cell.label||cell.type}</td>`;
+    // ── Sub header ──
+    doc.setTextColor(30,41,59);
+    doc.setFontSize(10); doc.setFont("helvetica","bold");
+    doc.text("Class: "+(info?.label||""), margin, y+5);
+    doc.text("Class Teacher: "+(ct?.name||"Not assigned"), pageW/2, y+5, {align:"center"});
+    doc.text("Year: "+new Date().getFullYear()+"–"+(new Date().getFullYear()+1), pageW-margin, y+5, {align:"right"});
+    y += 12;
+
+    // ── Table ──
+    const colW = (pageW - margin*2 - 22) / workingDays.length;
+    const rowH = (pageH - y - margin - 8) / Math.max(refS.length,1);
+    const timeW = 22;
+
+    // Header row
+    doc.setFillColor(30,41,59);
+    doc.rect(margin, y, timeW, 8, "F");
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(7); doc.setFont("helvetica","bold");
+    doc.text("TIME", margin+timeW/2, y+5.5, {align:"center"});
+
+    workingDays.forEach((day,di) => {
+      const x = margin + timeW + di*colW;
+      doc.setFillColor(30,41,59);
+      doc.rect(x, y, colW, 8, "F");
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(7); doc.setFont("helvetica","bold");
+      doc.text(day.toUpperCase(), x+colW/2, y+5.5, {align:"center"});
+    });
+    y += 8;
+
+    // Data rows
+    refS.forEach((slot,si) => {
+      const comp   = refComp[si];
+      const time   = comp ? minsToTime(comp.startMins) : "";
+      const isFixed = isBreak(slot.type)||slot.type==="assembly";
+      const rH     = Math.max(rowH, 8);
+
+      // Time cell
+      doc.setFillColor(248,250,252);
+      doc.rect(margin, y, timeW, rH, "FD");
+      doc.setTextColor(100,116,139);
+      doc.setFontSize(6); doc.setFont("helvetica","normal");
+      doc.text(time, margin+timeW/2, y+rH/2+1, {align:"center"});
+
+      workingDays.forEach((day,di) => {
+        const x    = margin + timeW + di*colW;
+        const cell = (timetable[key][day]||[])[si];
+
+        if(!cell) {
+          doc.setFillColor(248,250,252); doc.rect(x,y,colW,rH,"FD");
+        } else if(cell.fixed) {
+          const fixedColors = {assembly:[254,249,195],recess:[220,252,231],lunch:[255,237,213]};
+          const fc = fixedColors[cell.type]||[248,250,252];
+          doc.setFillColor(...fc); doc.rect(x,y,colW,rH,"FD");
+          doc.setTextColor(100,116,139);
+          doc.setFontSize(6); doc.setFont("helvetica","bold");
+          doc.text(cell.label||cell.type, x+colW/2, y+rH/2+1, {align:"center"});
+        } else {
+          const sc = sColorMap[cell.subject]||[241,245,249];
+          doc.setFillColor(...sc); doc.rect(x,y,colW,rH,"FD");
+          doc.setTextColor(30,41,59);
+          doc.setFontSize(7); doc.setFont("helvetica","bold");
+          doc.text(cell.subject||"", x+2, y+rH/2-0.5, {maxWidth:colW-4});
+          if(cell.tname) {
+            doc.setFontSize(5.5); doc.setFont("helvetica","normal");
+            doc.setTextColor(100,116,139);
+            doc.text(cell.tname, x+2, y+rH/2+4, {maxWidth:colW-4});
+          }
         }
-        const bg = sColorMap[cell.subject]||"#f8fafc";
-        return `<td style="padding:6px 8px;border:1px solid #e2e8f0;background:${bg};vertical-align:top;">
-          <div style="font-weight:700;font-size:11px;color:#1e293b;">${cell.subject||""}</div>
-          <div style="font-size:9px;color:#64748b;margin-top:2px;">${cell.tname||""}</div>
-        </td>`;
-      }).join("");
-      return `<tr>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0;font-size:9px;color:#64748b;white-space:nowrap;font-family:monospace;">${time}</td>
-        ${cells}
-      </tr>`;
-    }).join("");
+      });
+      y += rH;
+    });
+
+    // Footer
+    doc.setTextColor(148,163,184);
+    doc.setFontSize(6); doc.setFont("helvetica","normal");
+    doc.text("Generated by TimeTable Pro  |  "+new Date().toLocaleDateString("en-IN"), pageW-margin, pageH-4, {align:"right"});
 
     // Subject legend
-    const legend = allSubj.map(s=>{
-      const bg = sColorMap[s]||"#f8fafc";
-      return `<span style="background:${bg};border:1px solid #e2e8f0;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:600;margin:2px;">${s}</span>`;
-    }).join("");
+    let lx = margin; const ly = pageH-8;
+    doc.setFontSize(5.5);
+    allSubj.slice(0,10).forEach(s => {
+      const c = sColorMap[s]||[241,245,249];
+      doc.setFillColor(...c); doc.rect(lx,ly,3,3,"F");
+      doc.setTextColor(30,41,59);
+      doc.text(s, lx+4, ly+2.5);
+      lx += doc.getTextWidth(s)+8;
+    });
 
-    const html = `<!DOCTYPE html>
-<!--
-╔═══════════════════════════════════════════════════════════════╗
-║           TIMETABLE PRO — PROPRIETARY SOFTWARE                ║
-║   © 2025 Felevare Global Ventures LLP. All Rights Reserved.   ║
-║                                                               ║
-║  This software is the confidential and proprietary            ║
-║  information of Felevare Global Ventures LLP.                 ║
-║  Unauthorized copying, modification, distribution,            ║
-║  or use of this software is strictly prohibited.              ║
-║                                                               ║
-║  Contact: felevareglobal@gmail.com                            ║
-║  Website: felevareglobal-hub.github.io/timetable-pro          ║
-╚═══════════════════════════════════════════════════════════════╝
---><html><head><title>Timetable – ${info?.label||""}</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:20px;font-size:12px;}
-      table{border-collapse:collapse;width:100%;}
-      @media print{body{padding:10px;}@page{size:A4 landscape;margin:10mm;}}
-    </style></head><body>
-    <div style="text-align:center;border-bottom:3px solid #4f46e5;padding-bottom:14px;margin-bottom:16px;">
-      <h1 style="margin:0;font-size:20px;color:#1e293b;">${school.name||"School"}</h1>
-      <div style="color:#64748b;font-size:12px;margin-top:4px;">
-        ${[school.board&&"Board: "+school.board, school.address].filter(Boolean).join(" · ")}
-      </div>
-      ${school.principalName?`<div style="color:#64748b;font-size:12px;">Principal: ${school.principalName}</div>`:""}
-      <div style="display:flex;justify-content:center;gap:32px;margin-top:10px;font-size:12px;">
-        <span><strong>Class:</strong> ${info?.label||""}</span>
-        <span><strong>Section:</strong> ${section}</span>
-        <span><strong>Class Teacher:</strong> ${ct?.name||"Not assigned"}</span>
-        <span><strong>Academic Year:</strong> ${new Date().getFullYear()}–${new Date().getFullYear()+1}</span>
-      </div>
-    </div>
-    <table>
-      <thead><tr>
-        <th style="padding:8px;border:1px solid #94a3b8;background:#1e293b;color:white;font-size:11px;text-align:left;width:80px;">Time</th>
-        ${dayHeaders}
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div style="margin-top:14px;">
-      <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;">Subject Legend:</div>
-      <div>${legend}</div>
-    </div>
-    <div style="margin-top:14px;font-size:10px;color:#94a3b8;text-align:right;">
-      Generated by TimeTable Pro · ${new Date().toLocaleDateString("en-IN")}
-    </div>
-    <script>window.onload=function(){window.print();}<\/script>
-    </body></html>`;
+    doc.save("Timetable_"+(info?.label||"class").replace(/\s/g,"_")+".pdf");
+  }
 
-    const w = window.open("","_blank");
-    if(w){ w.document.write(html); w.document.close(); }
-    else {
-      // Fallback: data URI
-      const blob = new Blob([html],{type:"text/html"});
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href=url; a.download=`timetable_${(info?.label||"class").replace(/\s/g,"_")}.html`; a.click();
-    }
+  // ── PDF for Teacher (downloads as PDF) ──
+  async function exportTeacherPDF(teacherId) {
+    if(!timetable) return;
+    const t = teachers.find(x=>x.id===teacherId);
+    if(!t) return;
+
+    const SUBJ_COLORS = [
+      [219,234,254],[220,252,231],[254,249,195],[255,228,230],[237,233,254],
+      [207,254,254],[255,237,213],[204,251,241],[224,231,255],[236,252,203]
+    ];
+    const allSubj = [...new Set(teachers.flatMap(x=>x.subjects||[]))];
+    const sColorMap = {};
+    allSubj.forEach((s,i)=>{ sColorMap[s]=SUBJ_COLORS[i%SUBJ_COLORS.length]; });
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4" });
+    const pageW=297, pageH=210, margin=10;
+    let y = margin;
+
+    // Header
+    doc.setFillColor(124,58,237);
+    doc.rect(0,0,pageW,22,"F");
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(15); doc.setFont("helvetica","bold");
+    doc.text(t.name, pageW/2, 10, {align:"center"});
+    doc.setFontSize(9); doc.setFont("helvetica","normal");
+    const info2 = [school.name, school.board&&"Board: "+school.board, t.bloodGroup&&"Blood: "+t.bloodGroup, t.whatsapp].filter(Boolean).join("  |  ");
+    doc.text(info2, pageW/2, 16, {align:"center"});
+
+    // Subjects
+    y = 26;
+    doc.setTextColor(30,41,59);
+    doc.setFontSize(8); doc.setFont("helvetica","bold");
+    doc.text("Subjects: "+(t.subjects||[]).join(", "), margin, y+5);
+    const totalP = allKeys.reduce((a,k)=>a+workingDays.reduce((b,day)=>b+((timetable[k.key]?.[day]||[]).filter(c=>c&&!c.fixed&&c.teacherId===teacherId).length),0),0);
+    doc.text("Total: "+totalP+" periods/week", pageW-margin, y+5, {align:"right"});
+    y += 12;
+
+    // Table
+    const colW = (pageW - margin*2 - 22) / workingDays.length;
+    const rowH = Math.max((pageH - y - margin - 8) / Math.max(refSlots.length,1), 7);
+    const timeW = 22;
+
+    // Header row
+    doc.setFillColor(124,58,237);
+    doc.rect(margin,y,timeW,8,"F");
+    doc.setTextColor(255,255,255);
+    doc.setFontSize(7); doc.setFont("helvetica","bold");
+    doc.text("TIME", margin+timeW/2, y+5.5, {align:"center"});
+    workingDays.forEach((day,di) => {
+      const x = margin+timeW+di*colW;
+      doc.setFillColor(124,58,237); doc.rect(x,y,colW,8,"F");
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(7); doc.setFont("helvetica","bold");
+      doc.text(day.toUpperCase(), x+colW/2, y+5.5, {align:"center"});
+    });
+    y += 8;
+
+    refSlots.forEach((slot,si) => {
+      const comp   = refTimes[si];
+      const time   = comp ? minsToTime(comp.start) : "";
+      const isFixed = isBreak(slot.type)||slot.type==="assembly";
+      const rH     = rowH;
+
+      doc.setFillColor(248,250,252);
+      doc.rect(margin,y,timeW,rH,"FD");
+      doc.setTextColor(100,116,139);
+      doc.setFontSize(6); doc.setFont("helvetica","normal");
+      doc.text(time, margin+timeW/2, y+rH/2+1, {align:"center"});
+
+      workingDays.forEach((day,di) => {
+        const x = margin+timeW+di*colW;
+        let found = null;
+        allKeys.forEach(k=>{
+          const cell=(timetable[k.key]?.[day]||[])[si];
+          if(cell&&!cell.fixed&&cell.teacherId===teacherId) found={...cell,classLabel:k.label};
+        });
+
+        if(found) {
+          const sc=sColorMap[found.subject]||[241,245,249];
+          doc.setFillColor(...sc); doc.rect(x,y,colW,rH,"FD");
+          doc.setTextColor(30,41,59);
+          doc.setFontSize(7); doc.setFont("helvetica","bold");
+          doc.text(found.subject||"", x+2, y+rH/2-0.5, {maxWidth:colW-4});
+          doc.setFontSize(5.5); doc.setFont("helvetica","normal");
+          doc.setTextColor(100,116,139);
+          doc.text(found.classLabel||"", x+2, y+rH/2+4, {maxWidth:colW-4});
+        } else if(isFixed) {
+          const fc={assembly:[254,249,195],recess:[220,252,231],lunch:[255,237,213]};
+          const c=fc[slot.type]||[248,250,252];
+          doc.setFillColor(...c); doc.rect(x,y,colW,rH,"FD");
+          doc.setTextColor(100,116,139);
+          doc.setFontSize(5.5); doc.setFont("helvetica","normal");
+          doc.text(slot.label||slot.type, x+colW/2, y+rH/2+1, {align:"center",maxWidth:colW-2});
+        } else {
+          doc.setFillColor(250,250,250); doc.rect(x,y,colW,rH,"FD");
+          doc.setTextColor(203,213,225);
+          doc.setFontSize(5.5); doc.setFont("helvetica","normal");
+          doc.text("free", x+colW/2, y+rH/2+1, {align:"center"});
+        }
+      });
+      y += rH;
+    });
+
+    doc.setTextColor(148,163,184);
+    doc.setFontSize(6); doc.setFont("helvetica","normal");
+    doc.text("Generated by TimeTable Pro  |  "+new Date().toLocaleDateString("en-IN"), pageW-margin, pageH-4, {align:"right"});
+    doc.save("Schedule_"+t.name.replace(/\s/g,"_")+".pdf");
   }
 
   // ── WhatsApp for Teacher ──
@@ -1793,7 +1962,7 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
     const clickable = cell&&!cell.fixed&&onClick;
     if(!cell) return(
       <td style={{padding:3}} onClick={onClick}>
-        <div style={{minHeight:38,background:"#f8fafc",borderRadius:6,border:"1px dashed #e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",cursor:onClick?"pointer":"default"}}>
+        <div style={{minHeight:42,background:"#f8fafc",borderRadius:6,border:"1px dashed #e2e8f0",display:"flex",alignItems:"center",justifyContent:"center",cursor:onClick?"pointer":"default"}}>
           <span style={{fontSize:9,color:"#cbd5e1"}}>+</span>
         </div>
       </td>
@@ -1802,7 +1971,7 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
       const f=FIXED_STYLE[cell.type]||{bg:"#f8fafc",bdr:"#e2e8f0",txt:"#94a3b8",icon:"·"};
       return(
         <td style={{padding:3}}>
-          <div style={{background:f.bg,border:`1px solid ${f.bdr}`,borderRadius:6,padding:"5px 4px",minHeight:38,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:f.bg,border:`1px solid ${f.bdr}`,borderRadius:6,padding:"5px 4px",minHeight:42,display:"flex",alignItems:"center",justifyContent:"center"}}>
             <span style={{fontSize:10,fontWeight:600,color:f.txt}}>{f.icon} {cell.label}</span>
           </div>
         </td>
@@ -1811,11 +1980,12 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
     const c=sColor[cell.subject]||{bg:"#f1f5f9",bdr:"#e2e8f0",txt:"#374151"};
     return(
       <td style={{padding:3,verticalAlign:"top",cursor:clickable?"pointer":"default"}} onClick={onClick}>
-        <div style={{background:c.bg,border:`2px solid ${clickable?"transparent":c.bdr}`,borderRadius:6,padding:"5px 7px",minHeight:38,transition:"border-color 0.1s"}}
+        <div style={{background:c.bg,border:`2px solid ${clickable?"transparent":c.bdr}`,borderRadius:6,padding:"5px 7px",minHeight:42,transition:"border-color 0.1s"}}
           onMouseEnter={e=>{if(clickable)e.currentTarget.style.borderColor=c.bdr;}}
           onMouseLeave={e=>{if(clickable)e.currentTarget.style.borderColor="transparent";}}>
           <div style={{fontSize:10,fontWeight:700,color:c.txt,lineHeight:1.3}}>{cell.subject}</div>
-          {cell.tname&&<div style={{fontSize:11,color:c.txt,opacity:0.8,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontWeight:600}}>{cell.tname}</div>}
+          {cell.tname&&<div style={{fontSize:10,fontWeight:600,color:c.txt,opacity:0.8,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cell.tname}</div>}
+          {cell.std&&<div style={{fontSize:9,color:c.txt,opacity:0.55,marginTop:1,fontStyle:"italic"}}>{cell.std}</div>}
         </div>
       </td>
     );
@@ -2092,7 +2262,14 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
                         </div>
                       </div>
                     }
-                    getCellForDay={(day,si)=>(timetable[activeKey][day]||[])[si]}
+                    getCellForDay={(day,si)=>{
+                      const cell=(timetable[activeKey][day]||[])[si];
+                      if(cell&&!cell.fixed&&!cell.std){
+                        const info=allKeys.find(k=>k.key===activeKey);
+                        return {...cell, std:info?.stdName||""};
+                      }
+                      return cell;
+                    }}
                   />
                 );
               })()}
@@ -2305,29 +2482,72 @@ function TimetableScreen({standards,teachers,daySchedules,school,timetable,setTi
                       </div>
                     </div>
 
-                    {/* Day-wise summary */}
+                    {/* Day-wise summary with Drag & Drop */}
                     <div style={{background:"white",border:"1px solid #e2e8f0",borderRadius:12,padding:14}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"#64748b",marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>Day-wise Summary</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>Day-wise Summary</div>
+                      <div style={{fontSize:10,color:"#94a3b8",marginBottom:10}}>Drag any period pill to a different day to move it</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
                         {workingDays.map(day=>{
                           const daySlots = schedule[day]?.filter(s=>s&&s.type==="lecture")||[];
                           return(
-                            <div key={day} style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                              <div style={{width:36,fontSize:11,fontWeight:700,color:"#475569",flexShrink:0}}>{day.slice(0,3)}</div>
+                            <div key={day}
+                              style={{display:"flex",alignItems:"flex-start",gap:10,padding:"6px 8px",borderRadius:8,
+                                border:"2px dashed #e2e8f0",minHeight:42,transition:"background 0.15s"}}
+                              onDragOver={e=>{e.preventDefault();e.currentTarget.style.background="#eef2ff";e.currentTarget.style.borderColor="#6366f1";}}
+                              onDragLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.borderColor="#e2e8f0";}}
+                              onDrop={e=>{
+                                e.preventDefault();
+                                e.currentTarget.style.background="transparent";
+                                e.currentTarget.style.borderColor="#e2e8f0";
+                                try {
+                                  const data = JSON.parse(e.dataTransfer.getData("text/plain"));
+                                  const {fromDay, fromSi, classKey} = data;
+                                  if(fromDay===day) return;
+                                  // Find first empty lecture slot in target day
+                                  const targetSlots = (timetable[classKey]?.[day]||[]);
+                                  let targetSi = -1;
+                                  for(let i=0;i<targetSlots.length;i++){
+                                    if(targetSlots[i]===null) { targetSi=i; break; }
+                                  }
+                                  if(targetSi===-1) { alert("No empty slot available on "+day); return; }
+                                  // Move cell
+                                  setTimetable(prev=>{
+                                    const updated = JSON.parse(JSON.stringify(prev));
+                                    const cell = updated[classKey][fromDay][fromSi];
+                                    updated[classKey][day][targetSi] = cell;
+                                    updated[classKey][fromDay][fromSi] = null;
+                                    return updated;
+                                  });
+                                } catch(err){ console.error(err); }
+                              }}>
+                              <div style={{width:36,fontSize:11,fontWeight:700,color:"#475569",flexShrink:0,paddingTop:4}}>{day.slice(0,3)}</div>
                               <div style={{flex:1,display:"flex",flexWrap:"wrap",gap:4}}>
                                 {daySlots.length===0
-                                  ? <span style={{fontSize:11,color:"#cbd5e1"}}>No lectures</span>
+                                  ? <span style={{fontSize:11,color:"#cbd5e1",paddingTop:4}}>Drop here to add</span>
                                   : daySlots.map((s,i)=>{
                                       const c=sColor[s.subject]||{bg:"#f1f5f9",bdr:"#e2e8f0",txt:"#374151"};
                                       return(
-                                        <span key={i} style={{background:c.bg,border:`1px solid ${c.bdr}`,color:c.txt,fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:6}}>
-                                          P{s.periodNum} · {s.subject} · {s.classLabel}
+                                        <span key={i}
+                                          draggable={true}
+                                          onDragStart={e=>{
+                                            e.dataTransfer.setData("text/plain", JSON.stringify({
+                                              fromDay:day, fromSi:s.si, classKey:activeKey
+                                            }));
+                                            e.currentTarget.style.opacity="0.5";
+                                          }}
+                                          onDragEnd={e=>{e.currentTarget.style.opacity="1";}}
+                                          style={{background:c.bg,border:`1px solid ${c.bdr}`,color:c.txt,
+                                            fontSize:10,fontWeight:600,padding:"3px 8px",borderRadius:6,
+                                            cursor:"grab",userSelect:"none",display:"flex",alignItems:"center",gap:4}}>
+                                          <span style={{opacity:0.5}}>⠿</span>
+                                          P{s.periodNum} · {s.subject}
+                                          {s.classLabel&&<span style={{opacity:0.6}}>· {s.classLabel}</span>}
                                         </span>
                                       );
                                     })
                                 }
                               </div>
-                              <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",flexShrink:0}}>{daySlots.length}p</div>
+                              <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",flexShrink:0,paddingTop:4}}>{daySlots.length}p</div>
                             </div>
                           );
                         })}
@@ -2415,7 +2635,169 @@ function App() {
     }
   },[currentSchool]);
 
-  const screenProps={school,setSchool,standards,setStandards,subjects,setSubjects,teachers,setTeachers,daySchedules,setDaySchedules,timetable,setTimetable};
+  // ── Supabase auto-save ──
+  const [saving,setSaving]   = useState(false);
+  const [savedMsg,setSavedMsg] = useState("");
+  const [dataLoaded,setDataLoaded] = useState(false);
+  const schoolId = currentSchool?.id;
+  const isDemo   = currentSchool?.is_demo;
+
+  function showSaved(msg){ setSavedMsg(msg||"Saved ✓"); setTimeout(()=>setSavedMsg(""),2500); }
+
+  // Load all data from Supabase on mount
+  useEffect(()=>{
+    if(!schoolId||isDemo){ setDataLoaded(true); return; }
+    async function loadAll(){
+      setSaving(true);
+      try {
+        const [sc,stds,subs,dsch,tchs,asgs,tt] = await Promise.all([
+          db.getSchool(schoolId),
+          db.getStandards(schoolId),
+          db.getSubjects(schoolId),
+          db.getDaySchedules(schoolId),
+          db.getTeachers(schoolId),
+          db.getAssignments(schoolId),
+          db.getTimetable(schoolId),
+        ]);
+        if(sc) setSchool(s=>({...s,...sc}));
+        if(stds?.length) setStandards(stds.map(s=>({...s,numDivisions:s.divisions?.length||1})));
+        if(subs?.length) setSubjects(subs.map(s=>s.name));
+        if(dsch?.length){
+          const ds={};
+          dsch.forEach(d=>{ ds[d.day_name]={slots:d.slots||[]}; });
+          setDaySchedules(prev=>({...prev,...ds}));
+        }
+        if(tchs?.length){
+          // Merge assignments into teachers
+          const tWithAssign = tchs.map(t=>({
+            ...t,
+            subjects: t.subjects||[],
+            assignments: (asgs||[]).filter(a=>a.teacher_id===t.id).map(a=>({
+              id:a.id, standardId:a.standard_id, division:a.division,
+              subject:a.subject, periodsPerWeek:a.periods_per_week
+            }))
+          }));
+          setTeachers(tWithAssign);
+        }
+        if(tt?.data) {
+          setTimetable(tt.data);
+          if(tt.class_teachers) setClassTeachers(tt.class_teachers);
+        }
+      } catch(e){ console.error("Load error:",e); }
+      setSaving(false);
+      setDataLoaded(true);
+    }
+    loadAll();
+  },[schoolId]);
+
+  // Auto-save school profile
+  async function saveSchoolProfile(updated){
+    if(!schoolId||isDemo) return;
+    setSaving(true);
+    await db.saveSchool({...updated,id:schoolId});
+    showSaved("School profile saved ✓");
+    setSaving(false);
+  }
+
+  // Auto-save standards
+  async function saveStandards(updated){
+    if(!schoolId||isDemo) return;
+    setSaving(true);
+    await db.saveStandards(schoolId, updated);
+    showSaved("Standards saved ✓");
+    setSaving(false);
+  }
+
+  // Auto-save subjects
+  async function saveSubjects(updated){
+    if(!schoolId||isDemo) return;
+    setSaving(true);
+    await db.saveSubjects(schoolId, updated);
+    showSaved("Subjects saved ✓");
+    setSaving(false);
+  }
+
+  // Auto-save day schedule
+  async function saveDaySchedule(day, slots){
+    if(!schoolId||isDemo) return;
+    await db.saveDaySchedule(schoolId, day, slots);
+  }
+
+  // Save teacher
+  async function saveTeacherToDb(teacher){
+    if(!schoolId||isDemo) return;
+    setSaving(true);
+    const { assignments, ...teacherData } = teacher;
+    const saved = await db.saveTeacher({...teacherData, school_id:schoolId});
+    const tid = saved?.[0]?.id || teacher.id;
+    await db.saveAssignments(schoolId, tid, assignments||[]);
+    showSaved("Teacher saved ✓");
+    setSaving(false);
+    return tid;
+  }
+
+  // Save timetable
+  async function saveTimetableToDb(tt, ct){
+    if(!schoolId||isDemo) return;
+    await db.saveTimetable(schoolId, tt, ct||{});
+    showSaved("Timetable saved ✓");
+  }
+
+  // ── Razorpay Payment ──
+  const RZP_KEY = "rzp_test_T92O7ZiZOBsoCw";
+
+  async function initiatePayment(planName, amount, billingCycle){
+    return new Promise((resolve,reject)=>{
+      const options = {
+        key: RZP_KEY,
+        amount: amount * 100, // paise
+        currency: "INR",
+        name: "TimeTable Pro",
+        description: planName+" Plan - "+billingCycle,
+        image: "https://felevareglobal-hub.github.io/timetable-pro/",
+        handler: async function(response){
+          // Save subscription to Supabase
+          await supa("POST","tt_subscriptions",{
+            school_id: schoolId,
+            plan_name: planName,
+            status: "active",
+            billing_cycle: billingCycle,
+            amount_paid: amount,
+            razorpay_payment_id: response.razorpay_payment_id,
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date(Date.now()+(billingCycle==="yearly"?365:30)*24*60*60*1000).toISOString(),
+          });
+          await supa("POST","tt_payments",{
+            school_id: schoolId,
+            razorpay_payment_id: response.razorpay_payment_id,
+            amount: amount,
+            currency: "INR",
+            status: "paid",
+            plan_name: planName,
+            billing_cycle: billingCycle,
+          });
+          showSaved("Payment successful! Plan activated ✓");
+          resolve(response);
+        },
+        prefill: {
+          name: currentUser?.name||"",
+          email: currentUser?.email||"",
+        },
+        theme: { color: "#4f46e5" },
+        modal: { ondismiss: ()=>reject("Payment cancelled") }
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    });
+  }
+
+  const screenProps={
+    school,setSchool,standards,setStandards,subjects,setSubjects,
+    teachers,setTeachers,daySchedules,setDaySchedules,timetable,setTimetable,
+    saveSchoolProfile,saveStandards,saveSubjects,saveDaySchedule,
+    saveTeacherToDb,saveTimetableToDb,initiatePayment,
+    schoolId,isDemo,saving,savedMsg,
+  };
   const currentNav = NAV.find(n=>n.id===activeNav);
 
   return (
@@ -2441,7 +2823,12 @@ function App() {
         <div style={{width:32,height:32,background:"rgba(255,255,255,0.2)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>📅</div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontWeight:700,fontSize:14,lineHeight:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{school.name||"TimeTable Pro"}</div>
-          <div style={{fontSize:11,opacity:0.7,marginTop:2}}>{currentNav?.icon} {currentNav?.label}</div>
+          <div style={{fontSize:11,opacity:0.7,marginTop:2,display:"flex",alignItems:"center",gap:6}}>
+            <span>{currentNav?.icon} {currentNav?.label}</span>
+            {saving&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:10,padding:"1px 8px",fontSize:10}}>⏳ Saving...</span>}
+            {savedMsg&&!saving&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:10,padding:"1px 8px",fontSize:10}}>✓ {savedMsg}</span>}
+            {isDemo&&<span style={{background:"#f59e0b",color:"white",borderRadius:10,padding:"1px 8px",fontSize:10,fontWeight:700}}>DEMO</span>}
+          </div>
         </div>
         <button
           onClick={()=>setMenuOpen(o=>!o)}
@@ -2492,6 +2879,14 @@ function App() {
       {/* ── Main Content ── */}
       <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
         <div style={{maxWidth:860,margin:"0 auto"}}>
+          {!dataLoaded&&!isDemo?(
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:300,gap:16}}>
+              <div style={{width:48,height:48,border:"4px solid #e2e8f0",borderTopColor:"#4f46e5",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+              <div style={{fontSize:14,fontWeight:600,color:"#64748b"}}>Loading your school data...</div>
+              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            </div>
+          ) : (
+            <>
           {activeNav==="dashboard"  && <Dashboard school={school} standards={standards} subjects={subjects} teachers={teachers} timetable={timetable} onNav={navTo}/>}
           {activeNav==="school"     && <SchoolScreen {...screenProps}/>}
           {activeNav==="standards"  && <StandardsScreen {...screenProps}/>}
@@ -2499,6 +2894,8 @@ function App() {
           {activeNav==="subjects"   && <SubjectsScreen {...screenProps}/>}
           {activeNav==="teachers"   && <TeachersScreen {...screenProps}/>}
           {activeNav==="timetable"  && <TimetableScreen {...screenProps}/>}
+          </>
+          )}
         </div>
       </div>
     </div>
